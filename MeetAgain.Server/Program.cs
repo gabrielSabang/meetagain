@@ -16,6 +16,10 @@ var apiKey = builder.Configuration["Firebase:ApiKey"];
 
 if (string.IsNullOrWhiteSpace(credentialsPath))
     throw new Exception("Missing Firebase:CredentialsFile");
+if (!Path.IsPathRooted(credentialsPath))
+{
+    credentialsPath = Path.Combine(builder.Environment.ContentRootPath, credentialsPath);
+}
 if (string.IsNullOrWhiteSpace(projectId))
     throw new Exception("Missing Firebase:ProjectId");
 if (string.IsNullOrWhiteSpace(apiKey))
@@ -24,12 +28,10 @@ if (string.IsNullOrWhiteSpace(apiKey))
 // ------------------------------------------------------
 // Initialize Firebase Admin SDK
 // ------------------------------------------------------
-GoogleCredential googleCred;
-using (var stream = new FileStream(credentialsPath, FileMode.Open, FileAccess.Read))
-{
-    googleCred = GoogleCredential.FromStream(stream)
-        .CreateScoped("https://www.googleapis.com/auth/cloud-platform");
-}
+var firebaseCredential = await CredentialFactory.FromFileAsync<ServiceAccountCredential>(credentialsPath, CancellationToken.None);
+GoogleCredential googleCred = firebaseCredential
+    .ToGoogleCredential()
+    .CreateScoped("https://www.googleapis.com/auth/cloud-platform");
 
 if (FirebaseApp.DefaultInstance == null)
 {
