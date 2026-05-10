@@ -3,7 +3,7 @@ using Google.Apis.Auth.OAuth2;
 using Google.Cloud.Firestore;
 using MeetAgain.Server.Services;
 using Microsoft.AspNetCore.Components.Authorization;
-using Microsoft.AspNetCore.Components.Server.Circuits;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -54,7 +54,7 @@ builder.Services.AddSingleton(firestoreDb);
 // Blazor & Authentication
 // ------------------------------------------------------
 builder.Services.AddRazorPages();
-builder.Services.AddServerSideBlazor();
+
 
 // Add circuit options to maintain state
 builder.Services.AddServerSideBlazor().AddCircuitOptions(options =>
@@ -62,8 +62,9 @@ builder.Services.AddServerSideBlazor().AddCircuitOptions(options =>
     options.DetailedErrors = builder.Environment.IsDevelopment();
 });
 
-builder.Services.AddScoped<AuthenticationStateProvider, CustomAuthStateProvider>();
-builder.Services.AddAuthorizationCore();
+builder.Services.AddScoped<CustomAuthStateProvider>();
+builder.Services.AddScoped<AuthenticationStateProvider>(sp =>
+    sp.GetRequiredService<CustomAuthStateProvider>());
 
 // ------------------------------------------------------
 // App Services - IMPORTANT: Make services per-circuit

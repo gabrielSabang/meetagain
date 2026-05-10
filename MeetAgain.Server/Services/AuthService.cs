@@ -3,8 +3,6 @@ using Google.Cloud.Firestore;
 using MeetAgain.Server.Models;
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Threading.Tasks;
-using System;
 
 namespace MeetAgain.Server.Services
 {
@@ -16,12 +14,7 @@ namespace MeetAgain.Server.Services
 
         public AppUser? CurrentUser { get; private set; }
         public string? UserId => CurrentUser?.Uid;
-
         public CustomAuthStateProvider? AuthStateProvider { get; set; }
-
-        // -----------------------------
-        // New: exposes last Firebase error
-        // -----------------------------
         public string? LastFirebaseError { get; private set; }
 
         public AuthService(FirestoreService fs, string firebaseApiKey)
@@ -30,111 +23,110 @@ namespace MeetAgain.Server.Services
             _apiKey = firebaseApiKey ?? throw new ArgumentNullException(nameof(firebaseApiKey));
         }
 
-// ------------------------------------------------------
-// REGISTER
-// ------------------------------------------------------
-public async Task<bool> SignUpAsync(string email, string password, string displayName)
-{
-    UserRecord? fbUser = null;
-    try
-    {
-        // Create Firebase Auth user
-        fbUser = await FirebaseAuth.DefaultInstance.CreateUserAsync(new UserRecordArgs
+        // ------------------------------------------------------
+        // RESTORE SESSION (call this on every page load)
+        // ------------------------------------------------------
+        public async Task TryRestoreSessionAsync()
         {
-            Email = email,
-            Password = password,
-            DisplayName = displayName
-        });
-    }
-    catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.EmailAlreadyExists)
-    {
-        LastFirebaseError = "Email already exists.";
-        Console.WriteLine("Registration failed: " + LastFirebaseError);
-        return false;
-    }
-    catch (Exception ex)
-    {
-        LastFirebaseError = "Firebase registration failed: " + ex.Message;
-        Console.WriteLine(LastFirebaseError);
-        return false;
-    }
+            if (CurrentUser != null) return;
+            if (AuthStateProvider == null) return;
 
-    // Create Firestore user document
-    var user = new AppUser
-    {
-        Uid = fbUser.Uid,
-        Email = fbUser.Email ?? email,
-        DisplayName = displayName,
-        CreatedAt = DateTime.UtcNow.ToString("o")
-    };
+            try
+            {
+                var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+                var user = authState.User;
 
-    try
-    {
-        await _fs.CreateOrUpdateUserAsync(user);
-    }
-    catch (Exception ex)
-    {
-        // Rollback Firebase user if Firestore write fails
-        try
-        {
-            await FirebaseAuth.DefaultInstance.DeleteUserAsync(fbUser.Uid);
+                if (!(user.Identity?.IsAuthenticated ?? false)) return;
+
+                var uid = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrWhiteSpace(uid)) return;
+
+                CurrentUser = await _fs.GetUserAsync(uid);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("TryRestoreSessionAsync failed: " + ex.Message);
+            }
         }
-        catch { /* ignore rollback failure */ }
-
-        LastFirebaseError = "Failed to write user to Firestore: " + ex.Message;
-        Console.WriteLine(LastFirebaseError);
-        return false;
-    }
-
-    CurrentUser = user;
-    LastFirebaseError = null;
-    Console.WriteLine($"Registration successful: {email}");
-    return true;
-}
-
 
         // ------------------------------------------------------
-        // LOGIN VIA FIREBASE REST API
+        // REGISTER
+        // ------------------------------------------------------
+        public async Task<bool> SignUpAsync(string email, string password, string displayName)
+        {
+            UserRecord? fbUser = null;
+            try
+            {
+                fbUser = await FirebaseAuth.DefaultInstance.CreateUserAsync(new UserRecordArgs
+                {
+                    Email = email,
+                    Password = password,
+                    DisplayName = displayName
+                });
+            }
+            catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.EmailAlreadyExists)
+            {
+                LastFirebaseError = "Email already exists.";
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LastFirebaseError = "Firebase registration failed: " + ex.Message;
+                return false;
+            }
+
+            var user = new AppUser
+            {
+                Uid = fbUser.Uid,
+                Email = fbUser.Email ?? email,
+                DisplayName = displayName,
+                CreatedAt = DateTime.UtcNow.ToString("o")
+            };
+
+            try
+            {
+                await _fs.CreateOrUpdateUserAsync(user);
+            }
+            catch (Exception ex)
+            {
+                try { await FirebaseAuth.DefaultInstance.DeleteUserAsync(fbUser.Uid); } catch { }
+                LastFirebaseError = "Failed to write user to Firestore: " + ex.Message;
+                return false;
+            }
+
+            CurrentUser = user;
+            LastFirebaseError = null;
+            Console.WriteLine($"Registration successful: {email}");
+            return true;
+        }
+
+        // ------------------------------------------------------
+        // LOGIN
         // ------------------------------------------------------
         public async Task<bool> LoginAsync(string email, string password)
         {
             try
             {
                 var url = $"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={_apiKey}";
-
-                var payload = new
-                {
-                    email = email,
-                    password = password,
-                    returnSecureToken = true
-                };
+                var payload = new { email, password, returnSecureToken = true };
 
                 var response = await _http.PostAsJsonAsync(url, payload);
                 var rawResponse = await response.Content.ReadAsStringAsync();
 
-                Console.WriteLine("Firebase Login Response: " + rawResponse);
-
                 if (!response.IsSuccessStatusCode)
                 {
                     LastFirebaseError = rawResponse;
-                    Console.WriteLine($"Login failed! Status code: {response.StatusCode}");
                     return false;
                 }
 
                 var json = JsonDocument.Parse(rawResponse).RootElement;
 
-                string idToken = json.TryGetProperty("idToken", out var idTokenProp)
-                    ? idTokenProp.GetString() ?? ""
-                    : "";
-
-                string localId = json.TryGetProperty("localId", out var localIdProp)
-                    ? localIdProp.GetString() ?? ""
-                    : "";
+                string idToken = json.TryGetProperty("idToken", out var t) ? t.GetString() ?? "" : "";
+                string localId = json.TryGetProperty("localId", out var l) ? l.GetString() ?? "" : "";
 
                 if (string.IsNullOrWhiteSpace(idToken) || string.IsNullOrWhiteSpace(localId))
                 {
                     LastFirebaseError = "idToken or localId missing from Firebase response.";
-                    Console.WriteLine(LastFirebaseError);
                     return false;
                 }
 
@@ -142,7 +134,6 @@ public async Task<bool> SignUpAsync(string email, string password, string displa
                 if (user == null)
                 {
                     LastFirebaseError = "User not found in Firestore.";
-                    Console.WriteLine(LastFirebaseError);
                     return false;
                 }
 
@@ -177,7 +168,7 @@ public async Task<bool> SignUpAsync(string email, string password, string displa
         }
 
         // ------------------------------------------------------
-        // REQUIRED BY PAGES
+        // GET CURRENT USER
         // ------------------------------------------------------
         public Task<AppUser?> GetCurrentUserAsync()
         {

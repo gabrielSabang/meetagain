@@ -173,6 +173,9 @@
 
     protected override async Task OnInitializedAsync()
     {
+        
+        await Auth.TryRestoreSessionAsync();
+
         var user = await Auth.GetCurrentUserAsync();
         if (user == null)
         {

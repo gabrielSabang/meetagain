@@ -197,9 +197,18 @@
     private string errorMessage = "";
     private bool isSubmitting = false;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
-        model.Date = DateTime.Today.AddDays(1); // Default to tomorrow
+        await Auth.TryRestoreSessionAsync();
+
+        var user = await Auth.GetCurrentUserAsync();
+        if (user == null)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        model.Date = DateTime.Today.AddDays(1);
         timeString = "12:00";
         UpdateModelTime();
     }

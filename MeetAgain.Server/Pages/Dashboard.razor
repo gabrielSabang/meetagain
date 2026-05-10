@@ -174,76 +174,70 @@ else
     private bool loading = true;
 
     protected override async Task OnInitializedAsync()
+{
+    try
     {
+        Console.WriteLine("Dashboard: Starting initialization");
+
+        // Restore session from localStorage if new circuit (e.g. new tab)
+        await Auth.TryRestoreSessionAsync();
+
+        var user = await Auth.GetCurrentUserAsync();
+        if (user == null)
+        {
+            Console.WriteLine("Dashboard: No user found, redirecting to login");
+            Nav.NavigateTo("/login", forceLoad: false);
+            return;
+        }
+
+        Console.WriteLine($"Dashboard: User loaded - {user.Email}");
+        displayName = !string.IsNullOrEmpty(user.DisplayName) ? user.DisplayName : user.Email;
+
+        Console.WriteLine("Dashboard: Loading meetups...");
+        meetups = await MeetupService.GetMyMeetupsAsync() ?? new();
+        Console.WriteLine($"Dashboard: Loaded {meetups.Count} meetups");
+
         try
         {
-            Console.WriteLine("Dashboard: Starting initialization");
-
-            // Check authentication
-            var user = await Auth.GetCurrentUserAsync();
-            if (user == null)
-            {
-                Console.WriteLine("Dashboard: No user found, redirecting to login");
-                Nav.NavigateTo("/login", forceLoad: false);
-                return;
-            }
-
-            Console.WriteLine($"Dashboard: User loaded - {user.Email}");
-            displayName = !string.IsNullOrEmpty(user.DisplayName) ? user.DisplayName : user.Email;
-
-            // Load all data
-            Console.WriteLine("Dashboard: Loading meetups...");
-            meetups = await MeetupService.GetMyMeetupsAsync() ?? new();
-            Console.WriteLine($"Dashboard: Loaded {meetups.Count} meetups");
-            
-            // Get friend and group counts
-            try
-            {
-                var friends = await FriendService.GetFriendsAsync();
-                friendCount = friends?.Count ?? 0;
-                Console.WriteLine($"Dashboard: Loaded {friendCount} friends");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Dashboard: Error loading friends - {ex.Message}");
-                friendCount = 0;
-            }
-
-            try
-            {
-                var groups = await GroupService.GetMyGroupsAsync();
-                groupCount = groups?.Count ?? 0;
-                Console.WriteLine($"Dashboard: Loaded {groupCount} groups");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Dashboard: Error loading groups - {ex.Message}");
-                groupCount = 0;
-            }
-
-            // Separate upcoming and past meetups
-            var now = DateTime.Now;
-            upcoming = meetups
-                .Where(m => m.EventDateTime.ToLocalTime() > now)
-                .OrderBy(m => m.EventDateTime)
-                .ToList();
-
-            past = meetups
-                .Where(m => m.EventDateTime.ToLocalTime() <= now)
-                .OrderByDescending(m => m.EventDateTime)
-                .ToList();
-
-            Console.WriteLine($"Dashboard: {upcoming.Count} upcoming, {past.Count} past meetups");
+            var friends = await FriendService.GetFriendsAsync();
+            friendCount = friends?.Count ?? 0;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Dashboard: Fatal error - {ex.Message}");
-            Console.WriteLine($"Dashboard: Stack trace - {ex.StackTrace}");
+            Console.WriteLine($"Dashboard: Error loading friends - {ex.Message}");
         }
-        finally
+
+        try
         {
-            loading = false;
-            Console.WriteLine("Dashboard: Initialization complete");
+            var groups = await GroupService.GetMyGroupsAsync();
+            groupCount = groups?.Count ?? 0;
         }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Dashboard: Error loading groups - {ex.Message}");
+        }
+
+        var now = DateTime.Now;
+        upcoming = meetups
+            .Where(m => m.EventDateTime.ToLocalTime() > now)
+            .OrderBy(m => m.EventDateTime)
+            .ToList();
+
+        past = meetups
+            .Where(m => m.EventDateTime.ToLocalTime() <= now)
+            .OrderByDescending(m => m.EventDateTime)
+            .ToList();
+
+        Console.WriteLine($"Dashboard: {upcoming.Count} upcoming, {past.Count} past meetups");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Dashboard: Fatal error - {ex.Message}");
+    }
+    finally
+    {
+        loading = false;
+        Console.WriteLine("Dashboard: Initialization complete");
+    }
     }
 }

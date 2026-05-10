@@ -292,6 +292,8 @@
         {
             Console.WriteLine("Meetups: Starting initialization");
 
+            await Auth.TryRestoreSessionAsync();
+
             var user = await Auth.GetCurrentUserAsync();
             if (user == null)
             {
